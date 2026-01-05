@@ -3,7 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1abc9c">
+    <meta name="description" content="Real-time APRS-IS station tracking and mapping">
     <title>APRS-IS Live Map</title>
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -91,5 +98,20 @@
     <script src="js/sse-client.js"></script>
     <script src="js/map-manager.js"></script>
     <script src="js/app.js"></script>
+
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then((registration) => {
+                        console.log('[SW] Registered successfully:', registration.scope);
+                    })
+                    .catch((error) => {
+                        console.log('[SW] Registration failed:', error);
+                    });
+            });
+        }
+    </script>
 </body>
 </html>
