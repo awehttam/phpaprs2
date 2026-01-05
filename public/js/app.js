@@ -263,12 +263,33 @@ class APRSApp {
         const infoPanel = document.getElementById('info-panel');
         const controls = document.getElementById('controls');
 
+        // Check if we're in mobile view
+        const isMobile = window.innerWidth <= 768;
+
         if (this.sidebarVisible) {
-            sidebar.style.display = 'flex';
+            if (isMobile) {
+                // In mobile view, use the .visible class for transform animation
+                sidebar.classList.add('visible');
+                // Increase z-index of controls so they appear above sidebar
+                controls.style.zIndex = '3000';
+            } else {
+                // In desktop view, use display property
+                sidebar.style.display = 'flex';
+                controls.style.left = '320px';
+                controls.style.zIndex = '';
+            }
             infoPanel.style.display = 'none';
-            controls.style.left = '320px';
         } else {
-            sidebar.style.display = 'none';
+            if (isMobile) {
+                // In mobile view, remove the .visible class
+                sidebar.classList.remove('visible');
+                // Reset z-index
+                controls.style.zIndex = '';
+            } else {
+                // In desktop view, use display property
+                sidebar.style.display = 'none';
+                controls.style.zIndex = '';
+            }
             infoPanel.style.display = 'block';
             controls.style.left = '20px';
         }
