@@ -25,12 +25,17 @@ A real-time web application that connects to the APRS-IS network and displays tr
 1. **Clone or download** this repository to your web server
 
 2. **Configure the application**:
-   - Edit `backend/config.php`
+   - Copy `etc/config.local.example.php` to `etc/config.local.php`:
+     ```bash
+     cp etc/config.local.example.php etc/config.local.php
+     ```
+   - Edit `etc/config.local.php` to set your personal configuration
    - Set your callsign (or use `N0CALL` for read-only testing)
    - Configure the geographic filter for your area of interest:
      ```php
      'filter' => 'r/49.2488/-122.9805/100',  // Burnaby, Canada - lat/lon/radius_km
      ```
+   - **Note**: `etc/config.local.php` is ignored by git, so your personal settings won't be committed
 
 3. **Check PHP configuration**:
    ```bash
@@ -85,9 +90,15 @@ You should see:
 
 ## Configuration
 
+All configuration is done in `etc/config.local.php`. If you haven't created it yet, copy the example file:
+
+```bash
+cp etc/config.local.example.php etc/config.local.php
+```
+
 ### Geographic Filter
 
-Edit `backend/config.php` to change the filter:
+Edit `etc/config.local.php` to change the filter:
 
 ```php
 // Format: r/latitude/longitude/radius_km
@@ -96,7 +107,7 @@ Edit `backend/config.php` to change the filter:
 
 ### Memory Limits
 
-Adjust station limits in `backend/config.php`:
+Adjust station limits in `etc/config.local.php`:
 
 ```php
 'memory' => [
@@ -145,22 +156,26 @@ http://localhost:8000?lat=40.7128&lon=-74.0060&zoom=12
 
 ```
 phpaprs2/
+├── etc/
+│   ├── config.local.example.php    # Example configuration (copy to config.local.php)
+│   └── config.local.php            # Your personal config (git-ignored, create from example)
 ├── backend/
-│   ├── config.php              # Configuration
-│   ├── aprs-is-client.php      # APRS-IS connection daemon
-│   ├── aprs-parser.php         # Packet parser
-│   ├── station-manager.php     # State management
-│   ├── symbol-mapper.php       # Symbol to icon mapping
-│   └── sse-server.php          # SSE endpoint (included by public/sse.php)
+│   ├── config.php                  # Configuration loader (loads from etc/)
+│   ├── aprs-is-client.php          # APRS-IS connection daemon
+│   ├── aprs-parser.php             # Packet parser
+│   ├── station-manager.php         # State management
+│   ├── symbol-mapper.php           # Symbol to icon mapping
+│   └── sse-server.php              # SSE endpoint (included by public/sse.php)
 ├── public/
-│   ├── index.html              # Main page
-│   ├── sse.php                 # SSE proxy (web-accessible endpoint)
+│   ├── index.html                  # Main page
+│   ├── sse.php                     # SSE proxy (web-accessible endpoint)
 │   ├── css/
-│   │   └── style.css           # Styles
+│   │   └── style.css               # Styles
 │   └── js/
-│       ├── app.js              # Main application
-│       ├── map-manager.js      # Map handling
-│       └── sse-client.js       # SSE connection
+│       ├── app.js                  # Main application
+│       ├── map-manager.js          # Map handling
+│       └── sse-client.js           # SSE connection
+├── .gitignore                      # Git ignore rules
 └── README.md
 ```
 
@@ -201,7 +216,7 @@ sudo apt-get install php-apcu
 
 ### Debug Logging
 
-Enable debug logging in `backend/config.php`:
+Enable debug logging in `etc/config.local.php`:
 
 ```php
 'logging' => [
@@ -268,7 +283,7 @@ This project is open source. Feel free to modify and distribute.
 
 For issues or questions:
 - Check the logs: `backend/aprs-debug.log`
-- Verify your configuration in `backend/config.php`
+- Verify your configuration in `etc/config.local.php`
 - Ensure all PHP files are readable and executable
 
 Enjoy tracking APRS stations in real-time!
