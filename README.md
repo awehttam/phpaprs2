@@ -1,5 +1,7 @@
 # phpAPRS2 - APRS-IS Live Map
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A real-time web application that connects to the APRS-IS network and displays tracked stations on an interactive OpenStreetMap using Leaflet.
 
 ## Features
@@ -269,7 +271,14 @@ See [APRS-IS Filter Documentation](http://www.aprs-is.net/javAPRSFilter.aspx) fo
 
 ## License
 
-This project is open source. Feel free to modify and distribute.
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+### What this means:
+- ✅ Free to use for personal or commercial purposes
+- ✅ Free to modify and create derivative works
+- ✅ Free to distribute and sublicense
+- ⚠️ Must include the original copyright and license notice
+- ⚠️ Provided "as is" without warranty
 
 ## Credits
 
