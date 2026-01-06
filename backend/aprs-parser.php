@@ -7,6 +7,7 @@
  * - Uncompressed position reports (!lat/lonS or @timestamp/lat/lonS)
  * - Compressed position reports
  * - MIC-E encoded positions
+ * - Object reports (repeaters, events, etc.)
  */
 
 class APRSParser
@@ -86,7 +87,14 @@ class APRSParser
         }
 
         // Add callsign and timestamp
-        $parsed['callsign'] = $callsign;
+        // For objects, use object name as callsign
+        if (isset($parsed['is_object']) && isset($parsed['object_name'])) {
+            $parsed['callsign'] = $parsed['object_name'];
+            $parsed['source_callsign'] = $callsign; // Original callsign that reported the object
+        } else {
+            $parsed['callsign'] = $callsign;
+        }
+
         $parsed['timestamp'] = time();
         $parsed['raw_packet'] = $packet;
 
@@ -245,13 +253,56 @@ class APRSParser
 
     /**
      * Parse object report
+     * Format: ;OBJECTNAM*DDHHMMz[position][comment]
+     * OBJECTNAM is 9 characters (space-padded)
+     * * = live object, _ = killed object
      */
     private function parseObject(string $data): ?array
     {
-        // Object format: ;NAME     *DDHHMM/lat/lonS...
-        // For now, we'll skip object parsing
-        $this->log("Object parsing not yet implemented");
-        return null;
+        // Remove data type identifier (;)
+        $data = substr($data, 1);
+
+        // Check minimum length (9 chars name + 1 status + 7 timestamp + position)
+        if (strlen($data) < 20) {
+            $this->log("Object data too short");
+            return null;
+        }
+
+        // Extract object name (first 9 characters)
+        $objectName = substr($data, 0, 9);
+        $objectName = rtrim($objectName); // Remove trailing spaces
+
+        // Extract status (* = live, _ = killed)
+        $status = substr($data, 9, 1);
+
+        // Skip killed objects (they're being removed from the map)
+        if ($status === '_') {
+            $this->log("Skipping killed object: $objectName");
+            return null;
+        }
+
+        if ($status !== '*') {
+            $this->log("Invalid object status: $status");
+            return null;
+        }
+
+        // Skip timestamp (7 characters: DDHHMMZ)
+        $positionData = substr($data, 17);
+
+        // Parse the position data using existing method
+        $parsed = $this->parseUncompressedPosition($positionData);
+
+        if ($parsed === null) {
+            return null;
+        }
+
+        // Mark this as an object and use object name as callsign
+        $parsed['is_object'] = true;
+        $parsed['object_name'] = $objectName;
+
+        $this->log("Parsed object: $objectName");
+
+        return $parsed;
     }
 
     /**
