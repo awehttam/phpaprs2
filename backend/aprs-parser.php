@@ -240,15 +240,248 @@ class APRSParser
 
     /**
      * Parse MIC-E encoded position
-     * MIC-E is complex and encodes position in destination field
+     * MIC-E encodes latitude in destination address and longitude/speed/course in data
      */
     private function parseMicE(string $callsign, string $path, string $data): ?array
     {
-        // MIC-E parsing is quite complex and would require decoding
-        // the destination field. For now, we'll return null
-        // This can be implemented later if needed
-        $this->log("MIC-E parsing not yet implemented");
-        return null;
+        // Extract destination address (first field in path before comma)
+        $destination = explode(',', $path)[0];
+
+        if (strlen($destination) < 6) {
+            $this->log("MIC-E destination too short: $destination");
+            return null;
+        }
+
+        // Decode latitude from destination address (first 6 characters)
+        $latResult = $this->decodeMicELatitude(substr($destination, 0, 6));
+
+        if ($latResult === null) {
+            $this->log("Failed to decode MIC-E latitude from: " . substr($destination, 0, 6));
+            return null;
+        }
+
+        ['latitude' => $latitude, 'longitude_offset' => $lonOffset, 'ns' => $ns] = $latResult;
+
+        // Remove data type identifier (` or ')
+        $data = substr($data, 1);
+
+        // MIC-E information field format (minimum 8 bytes):
+        // d+28, m+28, h+28, SP+28, DC+28, SE+28, symbol_code, symbol_table
+        if (strlen($data) < 8) {
+            $this->log("MIC-E data too short");
+            return null;
+        }
+
+        // Decode longitude
+        $lonResult = $this->decodeMicELongitude($data, $lonOffset);
+
+        if ($lonResult === null) {
+            $this->log("Failed to decode MIC-E longitude");
+            return null;
+        }
+
+        ['longitude' => $longitude, 'speed' => $speed, 'course' => $course] = $lonResult;
+
+        // Apply N/S to latitude
+        if ($ns === 'S') {
+            $latitude *= -1;
+        }
+
+        // Extract symbol (byte 6 = symbol code, byte 7 = symbol table)
+        $symbolCode = $data[6];
+        $symbolTable = $data[7];
+
+        $result = [
+            'latitude' => round($latitude, 6),
+            'longitude' => round($longitude, 6),
+            'symbol_table' => $symbolTable,
+            'symbol_code' => $symbolCode,
+            'speed' => $speed,
+            'course' => $course,
+        ];
+
+        // Parse remaining data as comment (after byte 8)
+        $comment = substr($data, 8);
+        if (!empty($comment)) {
+            $result['comment'] = trim($comment);
+
+            // Check for altitude in comment (}ABC format where ABC are base-91 chars)
+            // Valid base-91 characters are ! through { (ASCII 33-123)
+            if (preg_match('/}([!-{]{3})/', $comment, $matches)) {
+                // Base-91 altitude encoding
+                $result['altitude'] = $this->decodeBase91Altitude($matches[1]);
+            }
+        }
+
+        $this->log("Parsed MIC-E: lat={$result['latitude']}, lon={$result['longitude']}, spd=$speed, crs=$course");
+
+        return $result;
+    }
+
+    /**
+     * Decode latitude from MIC-E destination address
+     * Returns ['latitude' => float, 'longitude_offset' => int, 'ns' => 'N'|'S']
+     */
+    private function decodeMicELatitude(string $dest): ?array
+    {
+        $latDigits = '';
+        $messageBits = [];
+        $longitudeOffset = 0;
+        $ns = 'N';
+
+        // Decode each character
+        for ($i = 0; $i < 6; $i++) {
+            $ch = $dest[$i];
+            $ascii = ord($ch);
+
+            // Determine digit and message bit
+            if ($ascii >= ord('0') && $ascii <= ord('9')) {
+                // 0-9: digit = character, bit = 0
+                $latDigits .= $ch;
+                $messageBits[] = 0;
+            } elseif ($ascii >= ord('A') && $ascii <= ord('J')) {
+                // A-J: digit = 0-9, bit = 1
+                $latDigits .= chr(ord('0') + ($ascii - ord('A')));
+                $messageBits[] = 1;
+            } elseif ($ascii >= ord('P') && $ascii <= ord('Y')) {
+                // P-Y: digit = 0-9, bit = 1
+                $latDigits .= chr(ord('0') + ($ascii - ord('P')));
+                $messageBits[] = 1;
+            } elseif ($ch === 'K' || $ch === 'L' || $ch === 'Z') {
+                // K, L, Z: space character
+                $latDigits .= ' ';
+                $messageBits[] = ($ch === 'L') ? 0 : 1;
+            } else {
+                $this->log("Invalid MIC-E character: $ch");
+                return null;
+            }
+        }
+
+        // Parse latitude: DDMM.HH format (space = 0 for missing digits)
+        $latDigits = str_replace(' ', '0', $latDigits);
+
+        // Extract degrees and minutes
+        $degrees = intval(substr($latDigits, 0, 2));
+        $minutes = floatval(substr($latDigits, 2, 2) . '.' . substr($latDigits, 4, 2));
+
+        $latitude = $degrees + ($minutes / 60);
+
+        // Decode message bits
+        // Bit 3 (index 3): N/S (0=South, 1=North)
+        $ns = $messageBits[3] ? 'N' : 'S';
+
+        // Bit 4 (index 4): Longitude offset (0=+0, 1=+100)
+        $longitudeOffset = $messageBits[4] ? 100 : 0;
+
+        // Bit 5 (index 5): W/E (0=East, 1=West)
+        $we = $messageBits[5] ? 'W' : 'E';
+
+        // For East longitude, we need to handle it differently
+        if ($we === 'E') {
+            $longitudeOffset = -100; // Signal East hemisphere
+        }
+
+        return [
+            'latitude' => $latitude,
+            'longitude_offset' => $longitudeOffset,
+            'ns' => $ns
+        ];
+    }
+
+    /**
+     * Decode longitude, speed, and course from MIC-E information field
+     */
+    private function decodeMicELongitude(string $data, int $lonOffset): ?array
+    {
+        // Extract first 6 bytes as ASCII values
+        $ch = ord($data[0]);
+        $m = ord($data[1]) - 28;
+        $h = ord($data[2]) - 28;
+        $sp = ord($data[3]) - 28;
+        $dc = ord($data[4]) - 28;
+        $se = ord($data[5]) - 28;
+
+        // Decode longitude degrees using direwolf algorithm
+        // The offset flag (from destination) determines which range to use
+        $offset = ($lonOffset === 100) ? 1 : 0;
+
+        if ($offset && $ch >= 118 && $ch <= 127) {
+            // offset=1, range 118-127: 0-9 degrees
+            $lonDeg = $ch - 118;
+        } elseif (!$offset && $ch >= 38 && $ch <= 127) {
+            // offset=0, range 38-127: 10-99 degrees
+            $lonDeg = ($ch - 38) + 10;
+        } elseif ($offset && $ch >= 108 && $ch <= 117) {
+            // offset=1, range 108-117: 100-109 degrees
+            $lonDeg = ($ch - 108) + 100;
+        } elseif ($offset && $ch >= 38 && $ch <= 107) {
+            // offset=1, range 38-107: 110-179 degrees
+            $lonDeg = ($ch - 38) + 110;
+        } else {
+            $this->log("Invalid MIC-E longitude byte: $ch");
+            return null;
+        }
+
+        // Decode longitude minutes
+        $lonMin = $m;
+        if ($lonMin >= 60) {
+            $lonMin -= 60;
+        }
+
+        // Decode hundredths of minutes
+        $lonHundredths = $h;
+
+        $longitude = $lonDeg + ($lonMin / 60) + ($lonHundredths / 6000);
+
+        // Apply West/East
+        if ($lonOffset !== -100) {
+            // West
+            $longitude *= -1;
+        }
+
+        // Decode speed (in knots)
+        $speed = ($sp * 10) + floor($dc / 10);
+        if ($speed >= 800) {
+            $speed -= 800;
+        }
+
+        // Decode course
+        $course = (($dc % 10) * 100) + $se;
+        if ($course >= 400) {
+            $course -= 400;
+        }
+
+        // Handle course special cases
+        if ($course == 360) {
+            $course = 0; // North
+        }
+
+        return [
+            'longitude' => $longitude,
+            'speed' => $speed,
+            'course' => $course
+        ];
+    }
+
+    /**
+     * Decode base-91 altitude (3 characters)
+     * Returns altitude in meters
+     */
+    private function decodeBase91Altitude(string $alt): int
+    {
+        if (strlen($alt) !== 3) {
+            return 0;
+        }
+
+        $a1 = ord($alt[0]) - 33;
+        $a2 = ord($alt[1]) - 33;
+        $a3 = ord($alt[2]) - 33;
+
+        // Base-91 encoding with 10000m offset
+        // Result is already in meters
+        $altMeters = ($a1 * 91 * 91) + ($a2 * 91) + $a3 - 10000;
+
+        return round($altMeters);
     }
 
     /**
