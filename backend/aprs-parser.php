@@ -137,6 +137,7 @@ class APRSParser
     /**
      * Parse uncompressed position format
      * Format: DDMM.mmN/DDDMM.mmWS or compressed
+     * Note: Spaces can be used instead of digits to represent zero
      */
     private function parseUncompressedPosition(string $data): ?array
     {
@@ -144,8 +145,9 @@ class APRSParser
         // Compressed positions are more complex, we'll focus on uncompressed first
 
         // Uncompressed format: DDMM.mmN/DDDMM.mmWS
-        // Pattern: 4 digits, decimal, 2 digits, N/S, symbol, 5 digits, decimal, 2 digits, E/W, symbol
-        $pattern = '/^(\d{4}\.\d{2})([NS])(.)(\d{5}\.\d{2})([EW])(.)(.*)$/';
+        // Pattern: All coordinate digits can be spaces (representing zero)
+        // APRS spec allows spaces to represent zero in positions
+        $pattern = '/^([\d ]{4}\.([\d ]{2}))([NS])(.)([\d ]{5}\.([\d ]{2}))([EW])(.)(.*)$/';
 
         if (!preg_match($pattern, $data, $matches)) {
             $this->log("Failed to match uncompressed position format: $data");
@@ -153,12 +155,16 @@ class APRSParser
         }
 
         $lat = $matches[1];
-        $latDir = $matches[2];
-        $symbolTable = $matches[3];
-        $lon = $matches[4];
-        $lonDir = $matches[5];
-        $symbolCode = $matches[6];
-        $comment = $matches[7] ?? '';
+        $latDir = $matches[3];
+        $symbolTable = $matches[4];
+        $lon = $matches[5];
+        $lonDir = $matches[7];
+        $symbolCode = $matches[8];
+        $comment = $matches[9] ?? '';
+
+        // Replace spaces with zeros in coordinates
+        $lat = str_replace(' ', '0', $lat);
+        $lon = str_replace(' ', '0', $lon);
 
         // Convert coordinates to decimal degrees
         $latitude = $this->convertToDecimal($lat, $latDir, false);
