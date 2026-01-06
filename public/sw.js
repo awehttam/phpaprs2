@@ -2,16 +2,16 @@
  * Service Worker for APRS-IS Live Map PWA
  */
 
-const CACHE_NAME = 'aprs-live-v1';
+const CACHE_NAME = 'aprs-live-v2';
 const ASSETS_TO_CACHE = [
     '/index.html',
     '/css/style.css',
     '/js/app.js',
     '/js/map-manager.js',
     '/js/sse-client.js',
-    '/icons/icon.svg',
-    '/icons/icon-192x192.png',
-    '/icons/icon-512x512.png',
+    '/images/icon.svg',
+    '/images/icon-192x192.png',
+    '/images/icon-512x512.png',
     '/manifest.json'
 ];
 
