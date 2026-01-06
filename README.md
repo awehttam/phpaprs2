@@ -13,12 +13,12 @@ A real-time web application that connects to the APRS-IS network and displays tr
 - **Station details**: Click markers for detailed information (position, altitude, speed, comment)
 - **Search & filter**: Find stations by callsign or comment
 - **Geographic filtering**: Configure area of interest (radius-based filtering)
-- **No database required**: In-memory storage with APCu or file fallback
+- **No database required**: In-memory storage with Memcached or file fallback
 
 ## Requirements
 
 - PHP 8.0 or higher
-- APCu extension (optional but recommended for better performance)
+- Memcached server and PHP Memcached extension (optional but recommended for better performance)
 - Web browser with EventSource support (all modern browsers)
 - Internet connection to APRS-IS network
 
@@ -39,10 +39,20 @@ A real-time web application that connects to the APRS-IS network and displays tr
      ```
    - **Note**: `etc/config.local.php` is ignored by git, so your personal settings won't be committed
 
-3. **Check PHP configuration**:
+3. **Install Memcached** (optional but recommended):
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install memcached php-memcached
+   sudo systemctl start memcached
+
+   # Verify installation
+   php -m | grep memcached
+   ```
+
+4. **Check PHP configuration**:
    ```bash
    php -v  # Should be 8.0+
-   php -m | grep apcu  # Check if APCu is available
+   php -m | grep memcached  # Check if Memcached extension is available
    ```
 
 ## Running the Application
@@ -60,7 +70,7 @@ This daemon will:
 - Log in with your configured callsign
 - Receive APRS packets matching your filter
 - Parse position reports
-- Store station data in memory (APCu or file)
+- Store station data in cache (Memcached or file fallback)
 - Print statistics every 60 seconds
 
 **Keep this terminal running!**
@@ -202,16 +212,33 @@ phpaprs2/
 2. Reduce `track_points` per station
 3. Decrease `station_timeout` to prune inactive stations faster
 
-### APCu not available
+### Memcached not available
 
-The application will automatically fall back to file-based storage (`backend/stations.json`). For better performance, install APCu:
+The application will automatically fall back to file-based storage (`backend/stations.json`). For better performance and to enable data sharing between CLI and web server processes, install Memcached:
 
 ```bash
 # Ubuntu/Debian
-sudo apt-get install php-apcu
+sudo apt-get install memcached php-memcached
+sudo systemctl start memcached
+sudo systemctl enable memcached  # Start on boot
+
+# Check status
+sudo systemctl status memcached
 
 # Windows
-# Enable in php.ini: extension=apcu
+# Download from: https://www.memcached.org/downloads
+# Install PHP extension via PECL or download DLL
+```
+
+Configure Memcached in `etc/config.local.php`:
+```php
+'cache' => [
+    'backend' => 'memcached',  // or 'file' for file-based fallback
+    'memcached' => [
+        'host' => '127.0.0.1',
+        'port' => 11211,
+    ],
+],
 ```
 
 ## Development

@@ -11,10 +11,12 @@ class StationManager
     private static $instance = null;
     private $stations = [];
     private $config;
+    private $memcached = null;
 
     private function __construct($config = null)
     {
         $this->config = $config ?? require __DIR__ . '/config.php';
+        $this->initializeCache();
     }
 
     /**
@@ -26,6 +28,33 @@ class StationManager
             self::$instance = new self($config);
         }
         return self::$instance;
+    }
+
+    /**
+     * Initialize cache backend (Memcached)
+     */
+    private function initializeCache(): void
+    {
+        $backend = $this->config['cache']['backend'] ?? 'file';
+
+        if ($backend === 'memcached' && class_exists('Memcached')) {
+            $this->memcached = new Memcached();
+            $host = $this->config['cache']['memcached']['host'] ?? '127.0.0.1';
+            $port = $this->config['cache']['memcached']['port'] ?? 11211;
+
+            $this->memcached->addServer($host, $port);
+
+            // Test connection
+            $stats = @$this->memcached->getStats();
+            if (empty($stats) || $stats === false) {
+                $this->log("Memcached connection failed, falling back to file storage");
+                $this->memcached = null;
+            } else {
+                $this->log("Memcached connection established ($host:$port)");
+            }
+        } elseif ($backend === 'memcached') {
+            $this->log("Memcached extension not available, falling back to file storage");
+        }
     }
 
     /**
@@ -235,53 +264,53 @@ class StationManager
     }
 
     /**
-     * Save stations to APCu for sharing with SSE server
+     * Save stations to cache (Memcached or file fallback)
      */
     public function saveToCache(): bool
     {
-        if (!function_exists('apcu_store')) {
-            $this->log("APCu not available, using fallback file storage");
-            return $this->saveToFile();
+        if ($this->memcached !== null) {
+            $key = $this->config['cache']['stations_key'] ?? 'aprs_stations';
+            $ttl = $this->config['cache']['ttl'] ?? 3600;
+
+            $success = $this->memcached->set($key, $this->stations, $ttl);
+
+            if ($success) {
+                $this->log("Saved " . count($this->stations) . " stations to Memcached");
+            } else {
+                $this->log("Failed to save stations to Memcached: " . $this->memcached->getResultMessage());
+                return $this->saveToFile();
+            }
+
+            return $success;
         }
 
-        $key = $this->config['apcu']['stations_key'] ?? 'aprs_stations';
-        $ttl = $this->config['apcu']['ttl'] ?? 3600;
-
-        $success = apcu_store($key, serialize($this->stations), $ttl);
-
-        if ($success) {
-            $this->log("Saved " . count($this->stations) . " stations to APCu");
-        } else {
-            $this->log("Failed to save stations to APCu");
-        }
-
-        return $success;
+        $this->log("Memcached not available, using file storage");
+        return $this->saveToFile();
     }
 
     /**
-     * Load stations from APCu
+     * Load stations from cache (Memcached or file fallback)
      */
     public function loadFromCache(): bool
     {
-        if (!function_exists('apcu_fetch')) {
-            $this->log("APCu not available, using fallback file storage");
-            return $this->loadFromFile();
+        if ($this->memcached !== null) {
+            $key = $this->config['cache']['stations_key'] ?? 'aprs_stations';
+            $data = $this->memcached->get($key);
+
+            if ($this->memcached->getResultCode() === Memcached::RES_SUCCESS && is_array($data)) {
+                $this->stations = $data;
+                $this->log("Loaded " . count($this->stations) . " stations from Memcached");
+                return true;
+            }
+
+            $this->log("Failed to load from Memcached: " . $this->memcached->getResultMessage());
         }
 
-        $key = $this->config['apcu']['stations_key'] ?? 'aprs_stations';
-        $data = apcu_fetch($key, $success);
-
-        if ($success && $data !== false) {
-            $this->stations = unserialize($data);
-            $this->log("Loaded " . count($this->stations) . " stations from APCu");
-            return true;
-        }
-
-        return false;
+        return $this->loadFromFile();
     }
 
     /**
-     * Fallback: Save to file if APCu not available
+     * Fallback: Save to file if Memcached not available
      */
     private function saveToFile(): bool
     {
@@ -297,7 +326,7 @@ class StationManager
     }
 
     /**
-     * Fallback: Load from file if APCu not available
+     * Fallback: Load from file if Memcached not available
      */
     private function loadFromFile(): bool
     {

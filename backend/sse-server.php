@@ -3,7 +3,7 @@
  * Server-Sent Events (SSE) Server
  *
  * Streams station updates to connected frontend clients in real-time.
- * Reads station data from shared memory (APCu or file) and pushes updates.
+ * Reads station data from shared cache (Memcached or file) and pushes updates.
  *
  * Access this endpoint from the frontend to receive real-time updates.
  */

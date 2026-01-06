@@ -67,11 +67,21 @@ return [
         'max_log_size' => 10485760, // 10 MB
     ],
 
-    'apcu' => [
-        // APCu cache key for station data
+    'cache' => [
+        // Cache backend: 'memcached' or 'file'
+        // Memcached allows sharing data between CLI and web server processes
+        'backend' => 'memcached',
+
+        // Memcached configuration
+        'memcached' => [
+            'host' => '127.0.0.1',
+            'port' => 11211,
+        ],
+
+        // Cache key for station data
         'stations_key' => 'aprs_stations',
 
-        // APCu cache TTL in seconds
+        // Cache TTL in seconds
         'ttl' => 3600,
     ],
 ];
