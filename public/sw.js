@@ -2,9 +2,9 @@
  * Service Worker for APRS-IS Live Map PWA
  */
 
-const CACHE_NAME = 'aprs-live-v3';
+const CACHE_NAME = 'aprs-live-v4';
 const ASSETS_TO_CACHE = [
-    '/index.html',
+    '/index.php',
     '/css/style.css',
     '/js/app.js',
     '/js/map-manager.js',
@@ -80,7 +80,7 @@ self.addEventListener('fetch', (event) => {
             .catch(() => {
                 // Fallback for offline navigation
                 if (event.request.mode === 'navigate') {
-                    return caches.match('/index.html');
+                    return caches.match('/index.php');
                 }
             })
     );
