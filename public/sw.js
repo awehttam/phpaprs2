@@ -2,7 +2,7 @@
  * Service Worker for APRS-IS Live Map PWA
  */
 
-const CACHE_NAME = 'aprs-live-v2';
+const CACHE_NAME = 'aprs-live-v3';
 const ASSETS_TO_CACHE = [
     '/index.html',
     '/css/style.css',
