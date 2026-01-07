@@ -53,10 +53,16 @@ class SSEClient {
                 console.log('Connected to APRS-IS stream:', data.message);
             });
 
-            // Station updates
+            // Station updates (initial full load)
             this.eventSource.addEventListener('stations', (e) => {
                 const stations = JSON.parse(e.data);
                 this.processStationUpdate(stations);
+            });
+
+            // Station delta updates (only changed stations)
+            this.eventSource.addEventListener('stations_delta', (e) => {
+                const delta = JSON.parse(e.data);
+                this.processDeltaUpdate(delta);
             });
 
             // Heartbeat
@@ -111,23 +117,25 @@ class SSEClient {
     }
 
     /**
-     * Process station update from server
+     * Process station update from server (initial full load)
      */
     processStationUpdate(stationsData) {
         const currentCallsigns = new Set(Object.keys(stationsData));
         const previousCallsigns = new Set(this.stations.keys());
 
+        // Batch arrays for updates
+        const updatedStations = [];
+        const removedStations = [];
+
         // Track updates
         let added = 0;
         let updated = 0;
-        let removed = 0;
 
         // Update or add stations
         for (const [callsign, station] of Object.entries(stationsData)) {
             const isNew = !this.stations.has(callsign);
-
             this.stations.set(callsign, station);
-            this.onStationsUpdate('update', station);
+            updatedStations.push(station);
 
             if (isNew) {
                 added++;
@@ -140,14 +148,55 @@ class SSEClient {
         for (const callsign of previousCallsigns) {
             if (!currentCallsigns.has(callsign)) {
                 this.stations.delete(callsign);
-                this.onStationsUpdate('remove', { callsign });
-                removed++;
+                removedStations.push(callsign);
             }
         }
 
+        // Batch update callback
+        if (updatedStations.length > 0 || removedStations.length > 0) {
+            this.onStationsUpdate('batch', {
+                updated: updatedStations,
+                removed: removedStations
+            });
+        }
+
         // Log statistics
-        if (added > 0 || removed > 0) {
-            console.log(`Station update: ${added} added, ${updated} updated, ${removed} removed (total: ${this.stations.size})`);
+        if (added > 0 || removedStations.length > 0) {
+            console.log(`Station update: ${added} added, ${updated} updated, ${removedStations.length} removed (total: ${this.stations.size})`);
+        }
+    }
+
+    /**
+     * Process delta update from server (only changed stations)
+     */
+    processDeltaUpdate(delta) {
+        const updatedStations = [];
+        const removedStations = [];
+
+        // Process updated stations
+        if (delta.updated) {
+            for (const [callsign, station] of Object.entries(delta.updated)) {
+                this.stations.set(callsign, station);
+                updatedStations.push(station);
+            }
+        }
+
+        // Process removed stations
+        if (delta.removed) {
+            for (const callsign of delta.removed) {
+                this.stations.delete(callsign);
+                removedStations.push(callsign);
+            }
+        }
+
+        // Batch update callback
+        if (updatedStations.length > 0 || removedStations.length > 0) {
+            this.onStationsUpdate('batch', {
+                updated: updatedStations,
+                removed: removedStations
+            });
+
+            console.log(`Delta update: ${updatedStations.length} updated, ${removedStations.length} removed (total: ${this.stations.size})`);
         }
     }
 

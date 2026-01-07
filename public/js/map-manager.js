@@ -27,7 +27,93 @@ class MapManager {
         // Symbol to icon mapping (APRS symbols to Font Awesome)
         this.iconMap = this.buildIconMap();
 
+        // Cache for created icons (symbol key -> L.divIcon instance)
+        this.iconCache = new Map();
+
+        // Cache for station symbol keys to avoid recreating icons
+        this.stationSymbols = new Map();
+
+        // Store all station data (for viewport culling)
+        this.stations = new Map();
+
+        // Viewport culling settings
+        this.viewportCullingEnabled = true;
+        this.cullPadding = 0.3; // 30% padding around viewport
+
+        // Setup viewport culling
+        this.setupViewportCulling();
+
         console.log('MapManager initialized');
+    }
+
+    /**
+     * Setup viewport culling to hide off-screen markers
+     */
+    setupViewportCulling() {
+        if (!this.viewportCullingEnabled) {
+            return;
+        }
+
+        let cullTimeout;
+
+        const debouncedCull = () => {
+            clearTimeout(cullTimeout);
+            cullTimeout = setTimeout(() => {
+                this.updateVisibleMarkers();
+            }, 150); // Debounce by 150ms
+        };
+
+        // Update visible markers on map move/zoom
+        this.map.on('moveend', debouncedCull);
+        this.map.on('zoomend', debouncedCull);
+
+        // Initial cull
+        this.updateVisibleMarkers();
+    }
+
+    /**
+     * Update which markers are visible based on viewport
+     */
+    updateVisibleMarkers() {
+        if (!this.viewportCullingEnabled) {
+            return;
+        }
+
+        const bounds = this.map.getBounds();
+
+        // Add padding to reduce flickering at edges
+        const latPadding = (bounds.getNorth() - bounds.getSouth()) * this.cullPadding;
+        const lngPadding = (bounds.getEast() - bounds.getWest()) * this.cullPadding;
+
+        const paddedBounds = L.latLngBounds(
+            [bounds.getSouth() - latPadding, bounds.getWest() - lngPadding],
+            [bounds.getNorth() + latPadding, bounds.getEast() + lngPadding]
+        );
+
+        let visible = 0;
+        let hidden = 0;
+
+        this.markers.forEach((marker, callsign) => {
+            const markerPos = marker.getLatLng();
+
+            if (paddedBounds.contains(markerPos)) {
+                // Show marker if in viewport
+                if (!this.map.hasLayer(marker)) {
+                    marker.addTo(this.map);
+                    visible++;
+                }
+            } else {
+                // Hide marker if outside viewport
+                if (this.map.hasLayer(marker)) {
+                    this.map.removeLayer(marker);
+                    hidden++;
+                }
+            }
+        });
+
+        if (visible > 0 || hidden > 0) {
+            console.log(`Viewport culling: ${visible} shown, ${hidden} hidden (${this.markers.size} total)`);
+        }
     }
 
     /**
@@ -40,6 +126,9 @@ class MapManager {
         if (!latest || !latest.latitude || !latest.longitude) {
             return;
         }
+
+        // Store station data
+        this.stations.set(callsign, station);
 
         const position = [latest.latitude, latest.longitude];
 
@@ -54,6 +143,45 @@ class MapManager {
         if (this.showTracks && station.track && station.track.length > 1) {
             this.updateTrack(callsign, station);
         }
+
+        // Trigger viewport culling if needed
+        if (this.viewportCullingEnabled) {
+            this.updateVisibleMarkers();
+        }
+    }
+
+    /**
+     * Batch update stations (much more efficient than individual updates)
+     */
+    updateStationsBatch(stations) {
+        for (const station of stations) {
+            const callsign = station.callsign;
+            const latest = station.latest;
+
+            if (!latest || !latest.latitude || !latest.longitude) {
+                continue;
+            }
+
+            // Store station data
+            this.stations.set(callsign, station);
+
+            // Create or update marker
+            if (!this.markers.has(callsign)) {
+                this.createMarker(callsign, station);
+            } else {
+                this.updateMarker(callsign, station);
+            }
+
+            // Update track
+            if (this.showTracks && station.track && station.track.length > 1) {
+                this.updateTrack(callsign, station);
+            }
+        }
+
+        // Trigger viewport culling to show/hide markers as needed
+        if (this.viewportCullingEnabled) {
+            this.updateVisibleMarkers();
+        }
     }
 
     /**
@@ -66,11 +194,18 @@ class MapManager {
         // Create custom icon
         const icon = this.createIcon(latest.symbol_table, latest.symbol_code);
 
+        // Store symbol key for this station
+        const symbolKey = (latest.symbol_table || '/') + (latest.symbol_code || '>');
+        this.stationSymbols.set(callsign, symbolKey);
+
         // Create marker
         const marker = L.marker(position, { icon });
 
-        // Bind popup with station info
-        marker.bindPopup(this.createPopupContent(station));
+        // Bind popup with lazy content generation (uses stored station data)
+        marker.bindPopup(() => {
+            const currentStation = this.stations.get(callsign);
+            return this.createPopupContent(currentStation || station);
+        });
 
         // Bind tooltip (callsign label) if labels enabled
         if (this.showLabels) {
@@ -87,9 +222,13 @@ class MapManager {
             console.log('Clicked station:', callsign);
         });
 
-        // Add to map
-        marker.addTo(this.map);
+        // Store marker (viewport culling will decide if it should be visible)
         this.markers.set(callsign, marker);
+
+        // Add to map only if culling is disabled (otherwise updateVisibleMarkers handles it)
+        if (!this.viewportCullingEnabled) {
+            marker.addTo(this.map);
+        }
     }
 
     /**
@@ -103,12 +242,20 @@ class MapManager {
         // Update position
         marker.setLatLng(position);
 
-        // Update popup content
-        marker.setPopupContent(this.createPopupContent(station));
+        // Only update icon if symbol changed
+        const symbolKey = (latest.symbol_table || '/') + (latest.symbol_code || '>');
+        const previousSymbol = this.stationSymbols.get(callsign);
 
-        // Update icon if symbol changed
-        const icon = this.createIcon(latest.symbol_table, latest.symbol_code);
-        marker.setIcon(icon);
+        if (symbolKey !== previousSymbol) {
+            const icon = this.createIcon(latest.symbol_table, latest.symbol_code);
+            marker.setIcon(icon);
+            this.stationSymbols.set(callsign, symbolKey);
+        }
+
+        // Only regenerate popup if popup is actually open
+        if (marker.isPopupOpen()) {
+            marker.setPopupContent(this.createPopupContent(station));
+        }
     }
 
     /**
@@ -143,7 +290,10 @@ class MapManager {
     removeStation(callsign) {
         // Remove marker
         if (this.markers.has(callsign)) {
-            this.map.removeLayer(this.markers.get(callsign));
+            const marker = this.markers.get(callsign);
+            if (this.map.hasLayer(marker)) {
+                this.map.removeLayer(marker);
+            }
             this.markers.delete(callsign);
         }
 
@@ -152,13 +302,24 @@ class MapManager {
             this.map.removeLayer(this.tracks.get(callsign));
             this.tracks.delete(callsign);
         }
+
+        // Remove stored station data
+        this.stations.delete(callsign);
+        this.stationSymbols.delete(callsign);
     }
 
     /**
-     * Create custom icon based on APRS symbol
+     * Create custom icon based on APRS symbol (cached for performance)
      */
     createIcon(symbolTable, symbolCode) {
         const key = (symbolTable || '/') + (symbolCode || '>');
+
+        // Return cached icon if available
+        if (this.iconCache.has(key)) {
+            return this.iconCache.get(key);
+        }
+
+        // Create new icon
         const iconClass = this.iconMap[key] || 'fa-circle-dot';
         const color = this.getSymbolColor(key);
 
@@ -168,13 +329,18 @@ class MapManager {
             </div>
         `;
 
-        return L.divIcon({
+        const icon = L.divIcon({
             html: iconHtml,
             className: 'station-icon-wrapper',
             iconSize: [32, 32],
             iconAnchor: [16, 16],
             popupAnchor: [0, -16]
         });
+
+        // Cache the icon for reuse
+        this.iconCache.set(key, icon);
+
+        return icon;
     }
 
     /**

@@ -45,15 +45,28 @@ class APRSApp {
     /**
      * Handle station update from SSE
      */
-    handleStationUpdate(action, station) {
-        if (action === 'update') {
-            this.mapManager.updateStation(station);
-        } else if (action === 'remove') {
-            this.mapManager.removeStation(station.callsign);
-        }
+    handleStationUpdate(action, data) {
+        if (action === 'batch') {
+            // Batch update - much more efficient
+            if (data.updated && data.updated.length > 0) {
+                this.mapManager.updateStationsBatch(data.updated);
+            }
+            if (data.removed && data.removed.length > 0) {
+                data.removed.forEach(callsign => {
+                    this.mapManager.removeStation(callsign);
+                });
+            }
 
-        // Update station list
-        this.updateStationList();
+            // Update station list once for entire batch
+            this.updateStationList();
+        } else if (action === 'update') {
+            // Legacy single station update (for backwards compatibility)
+            this.mapManager.updateStation(data);
+            this.updateStationList();
+        } else if (action === 'remove') {
+            this.mapManager.removeStation(data.callsign);
+            this.updateStationList();
+        }
     }
 
     /**
@@ -173,13 +186,7 @@ class APRSApp {
             `;
         }).join('');
 
-        // Add click handlers
-        listEl.querySelectorAll('.station-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const callsign = item.dataset.callsign;
-                this.mapManager.focusStation(callsign);
-            });
-        });
+        // Click handlers now handled by event delegation (no need to reattach)
     }
 
     /**
@@ -201,12 +208,31 @@ class APRSApp {
      * Initialize UI elements
      */
     initializeUI() {
-        // Search input
+        // Search input with debouncing to reduce rebuilds
         const searchInput = document.getElementById('search-input');
         if (searchInput) {
+            let debounceTimer;
             searchInput.addEventListener('input', (e) => {
                 this.searchFilter = e.target.value;
-                this.updateStationList();
+
+                // Debounce to avoid rebuilding on every keystroke
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    this.updateStationList();
+                }, 200); // 200ms debounce delay
+            });
+        }
+
+        // Event delegation for station list clicks (prevents memory leaks)
+        const listEl = document.getElementById('station-list');
+        if (listEl) {
+            listEl.addEventListener('click', (e) => {
+                // Find the station-item element (handle clicks on children)
+                const stationItem = e.target.closest('.station-item');
+                if (stationItem) {
+                    const callsign = stationItem.dataset.callsign;
+                    this.mapManager.focusStation(callsign);
+                }
             });
         }
     }

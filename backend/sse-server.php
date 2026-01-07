@@ -42,6 +42,9 @@ $eventId = 0;
 // Last heartbeat time
 $lastHeartbeat = time();
 
+// Track last sent state for delta updates
+$lastSentStations = [];
+
 // Log function
 function logSSE($message) {
     global $config;
@@ -69,9 +72,45 @@ function sendEvent($event, $data, &$eventId) {
     flush();
 }
 
+// Detect changed stations for delta updates
+function getChangedStations($currentStations, &$lastSentStations) {
+    $changed = [];
+
+    // Check for new or updated stations
+    foreach ($currentStations as $callsign => $station) {
+        // New station
+        if (!isset($lastSentStations[$callsign])) {
+            $changed[$callsign] = $station;
+            continue;
+        }
+
+        // Check if station data changed
+        // Compare last_update timestamp for efficiency
+        if ($station['last_update'] !== $lastSentStations[$callsign]['last_update']) {
+            $changed[$callsign] = $station;
+        }
+    }
+
+    // Check for removed stations
+    $removed = [];
+    foreach ($lastSentStations as $callsign => $station) {
+        if (!isset($currentStations[$callsign])) {
+            $removed[] = $callsign;
+        }
+    }
+
+    return [
+        'updated' => $changed,
+        'removed' => $removed
+    ];
+}
+
 // Send initial connection event
 logSSE("New SSE client connected");
 sendEvent('connected', ['message' => 'Connected to APRS-IS stream', 'time' => time()], $eventId);
+
+// Flag to track initial load
+$isInitialLoad = true;
 
 // Main SSE loop
 while (true) {
@@ -85,10 +124,29 @@ while (true) {
     $stationManager->loadFromCache();
     $stations = $stationManager->getStations();
 
-    // Send station update
-    sendEvent('stations', $stations, $eventId);
+    // On initial connection, send all stations
+    if ($isInitialLoad) {
+        sendEvent('stations', $stations, $eventId);
+        logSSE("Sent initial " . count($stations) . " stations to client (event #$eventId)");
+        $lastSentStations = $stations;
+        $isInitialLoad = false;
+    } else {
+        // Send only changed stations (delta update)
+        $delta = getChangedStations($stations, $lastSentStations);
 
-    logSSE("Sent " . count($stations) . " stations to client (event #$eventId)");
+        if (!empty($delta['updated']) || !empty($delta['removed'])) {
+            sendEvent('stations_delta', $delta, $eventId);
+            logSSE("Sent delta: " . count($delta['updated']) . " updated, " . count($delta['removed']) . " removed (event #$eventId)");
+
+            // Update last sent state
+            foreach ($delta['updated'] as $callsign => $station) {
+                $lastSentStations[$callsign] = $station;
+            }
+            foreach ($delta['removed'] as $callsign) {
+                unset($lastSentStations[$callsign]);
+            }
+        }
+    }
 
     // Send heartbeat if needed
     $now = time();
