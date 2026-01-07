@@ -35,6 +35,7 @@ $stationManager = StationManager::getInstance($config);
 // Get update interval from config
 $updateInterval = $config['sse']['update_interval'] ?? 2;
 $heartbeatInterval = $config['sse']['heartbeat_interval'] ?? 30;
+$stationTimeout = $config['memory']['station_timeout'] ?? 3600;
 
 // Event ID counter
 $eventId = 0;
@@ -73,7 +74,7 @@ function sendEvent($event, $data, &$eventId) {
 }
 
 // Detect changed stations for delta updates
-function getChangedStations($currentStations, &$lastSentStations) {
+function getChangedStations($currentStations, &$lastSentStations, $stationTimeout) {
     $changed = [];
 
     // Check for new or updated stations
@@ -91,11 +92,16 @@ function getChangedStations($currentStations, &$lastSentStations) {
         }
     }
 
-    // Check for removed stations
+    // Check for removed stations (only mark as removed if timed out)
     $removed = [];
+    $now = time();
     foreach ($lastSentStations as $callsign => $station) {
         if (!isset($currentStations[$callsign])) {
-            $removed[] = $callsign;
+            // Only mark as removed if station has actually timed out
+            // Don't remove if it just temporarily disappeared from cache
+            if (($now - $station['last_update']) > $stationTimeout) {
+                $removed[] = $callsign;
+            }
         }
     }
 
@@ -132,7 +138,7 @@ while (true) {
         $isInitialLoad = false;
     } else {
         // Send only changed stations (delta update)
-        $delta = getChangedStations($stations, $lastSentStations);
+        $delta = getChangedStations($stations, $lastSentStations, $stationTimeout);
 
         if (!empty($delta['updated']) || !empty($delta['removed'])) {
             sendEvent('stations_delta', $delta, $eventId);
