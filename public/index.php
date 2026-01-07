@@ -24,6 +24,14 @@
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/style.css">
+
+    <?php
+    // Include custom header file if it exists (e.g., for analytics tracking)
+    $headerFile = __DIR__ . '/../etc/header.php';
+    if (file_exists($headerFile)) {
+        include $headerFile;
+    }
+    ?>
 </head>
 <body>
     <div id="app">
