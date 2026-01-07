@@ -242,6 +242,58 @@ class APRSParser
             $altitudeFeet = intval($matches[1]);
             $result['altitude'] = round($altitudeFeet * 0.3048); // Convert to meters
         }
+
+        // Parse weather data (APRS weather report format)
+        // Format: _DDMMHHHTTT.VVVGGGTTT...
+        // Where: c=wind dir (degrees), s=wind speed (mph), g=gust, t=temp (F), r=rain, etc.
+        // More common format in comment: c123s045g050t072r...p...P...h50b10201
+        $weather = [];
+
+        // Wind direction (c = course, 000-360 degrees)
+        if (preg_match('/c(\d{3})/', $comment, $matches)) {
+            $weather['wind_direction'] = intval($matches[1]);
+        }
+
+        // Wind speed (s = sustained, mph)
+        if (preg_match('/s(\d{3})/', $comment, $matches)) {
+            $weather['wind_speed'] = intval($matches[1]);
+        }
+
+        // Wind gust (g = gust, mph)
+        if (preg_match('/g(\d{3})/', $comment, $matches)) {
+            $weather['wind_gust'] = intval($matches[1]);
+        }
+
+        // Temperature (t = temperature, Fahrenheit, may be negative with leading -)
+        if (preg_match('/t(-?\d{3})/', $comment, $matches)) {
+            $tempF = intval($matches[1]);
+            $weather['temperature_f'] = $tempF;
+            $weather['temperature_c'] = round(($tempF - 32) * 5 / 9, 1);
+        }
+
+        // Humidity (h = humidity, 00-99%)
+        if (preg_match('/h(\d{2})/', $comment, $matches)) {
+            $humidity = intval($matches[1]);
+            $weather['humidity'] = ($humidity == 0) ? 100 : $humidity; // 00 means 100%
+        }
+
+        // Barometric pressure (b = barometric, 0.1 mbar)
+        if (preg_match('/b(\d{5})/', $comment, $matches)) {
+            $weather['pressure'] = intval($matches[1]) / 10; // Convert to mbar
+        }
+
+        // Rainfall (last hour, last 24h, since midnight)
+        if (preg_match('/r(\d{3})/', $comment, $matches)) {
+            $weather['rain_1h'] = intval($matches[1]) / 100; // in inches
+        }
+        if (preg_match('/p(\d{3})/', $comment, $matches)) {
+            $weather['rain_24h'] = intval($matches[1]) / 100; // in inches
+        }
+
+        // If we found weather data, mark this as a weather station
+        if (!empty($weather)) {
+            $result['weather'] = $weather;
+        }
     }
 
     /**

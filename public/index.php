@@ -55,6 +55,10 @@
                         <i class="fas fa-map-marker-alt"></i>
                         <span id="station-count">0 stations</span>
                     </div>
+                    <div class="status-item" id="weather-display" style="display: none;">
+                        <i class="fas fa-cloud-sun"></i>
+                        <span id="weather-info">--</span>
+                    </div>
                 </div>
             </div>
 

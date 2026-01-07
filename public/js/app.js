@@ -36,6 +36,9 @@ class APRSApp {
         this.initializeUI();
         this.initializeControls();
 
+        // Setup weather updates on map move
+        this.setupWeatherUpdates();
+
         // Connect to SSE
         this.sseClient.connect();
 
@@ -67,6 +70,9 @@ class APRSApp {
             this.mapManager.removeStation(data.callsign);
             this.updateStationList();
         }
+
+        // Update weather display
+        this.updateWeatherDisplay();
     }
 
     /**
@@ -341,6 +347,84 @@ class APRSApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    /**
+     * Setup weather display updates
+     */
+    setupWeatherUpdates() {
+        // Update weather when map center changes
+        this.mapManager.map.on('moveend', () => {
+            this.updateWeatherDisplay();
+        });
+    }
+
+    /**
+     * Update weather display with nearest weather station
+     */
+    updateWeatherDisplay() {
+        const weatherDisplay = document.getElementById('weather-display');
+        const weatherInfo = document.getElementById('weather-info');
+
+        if (!weatherDisplay || !weatherInfo) {
+            return;
+        }
+
+        // Get all stations with weather data
+        const stations = this.sseClient.getStations();
+        const weatherStations = stations.filter(s => s.latest && s.latest.weather);
+
+        if (weatherStations.length === 0) {
+            weatherDisplay.style.display = 'none';
+            return;
+        }
+
+        // Get map center
+        const center = this.mapManager.map.getCenter();
+
+        // Find nearest weather station
+        let nearest = null;
+        let minDistance = Infinity;
+
+        weatherStations.forEach(station => {
+            const lat = station.latest.latitude;
+            const lon = station.latest.longitude;
+
+            // Calculate distance (simple Euclidean for now)
+            const distance = Math.sqrt(
+                Math.pow(lat - center.lat, 2) +
+                Math.pow(lon - center.lng, 2)
+            );
+
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearest = station;
+            }
+        });
+
+        if (!nearest) {
+            weatherDisplay.style.display = 'none';
+            return;
+        }
+
+        // Display weather data
+        const weather = nearest.latest.weather;
+        let weatherText = '';
+
+        if (weather.temperature_c !== undefined) {
+            weatherText = `${weather.temperature_c}°C`;
+
+            if (weather.humidity !== undefined) {
+                weatherText += ` • ${weather.humidity}%`;
+            }
+        } else {
+            weatherText = 'Weather data available';
+        }
+
+        // Add callsign as title attribute
+        weatherInfo.textContent = weatherText;
+        weatherInfo.title = `From ${nearest.callsign}`;
+        weatherDisplay.style.display = 'flex';
     }
 }
 
