@@ -2,7 +2,7 @@
   "name": "APRS-IS Live Map",
   "short_name": "APRS Live",
   "description": "Real-time APRS-IS station tracking and mapping",
-  "start_url": "/index.html",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#2c3e50",
   "theme_color": "#1abc9c",
