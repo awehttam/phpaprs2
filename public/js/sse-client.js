@@ -17,10 +17,12 @@ class SSEClient {
         this.onStationsUpdate = options.onStationsUpdate || (() => {});
         this.onStatusChange = options.onStatusChange || (() => {});
         this.onHeartbeat = options.onHeartbeat || (() => {});
+        this.onMessagesUpdate = options.onMessagesUpdate || (() => {});
         this.onError = options.onError || (() => {});
 
         // Station storage
         this.stations = new Map();
+        this.messages = [];
 
         console.log('SSEClient initialized with URL:', url);
     }
@@ -70,6 +72,18 @@ class SSEClient {
                 const data = JSON.parse(e.data);
                 console.log('Heartbeat:', data);
                 this.onHeartbeat(data);
+            });
+
+            // Messages (initial load)
+            this.eventSource.addEventListener('messages', (e) => {
+                const messages = JSON.parse(e.data);
+                this.processMessagesUpdate(messages);
+            });
+
+            // Messages delta (new messages only)
+            this.eventSource.addEventListener('messages_delta', (e) => {
+                const newMessages = JSON.parse(e.data);
+                this.processMessagesDelta(newMessages);
             });
 
             // Error handler
@@ -258,5 +272,47 @@ class SSEClient {
             default:
                 return 'unknown';
         }
+    }
+
+    /**
+     * Process messages update (initial load)
+     */
+    processMessagesUpdate(messages) {
+        this.messages = messages;
+        console.log(`Messages loaded: ${messages.length} messages`);
+
+        // Trigger callback if defined
+        if (this.onMessagesUpdate) {
+            this.onMessagesUpdate('batch', this.messages);
+        }
+    }
+
+    /**
+     * Process messages delta (new messages)
+     */
+    processMessagesDelta(newMessages) {
+        // Add new messages to array
+        this.messages.push(...newMessages);
+
+        console.log(`New messages received: ${newMessages.length} (total: ${this.messages.length})`);
+
+        // Trigger callback if defined
+        if (this.onMessagesUpdate) {
+            this.onMessagesUpdate('delta', newMessages);
+        }
+    }
+
+    /**
+     * Get all messages
+     */
+    getMessages() {
+        return this.messages;
+    }
+
+    /**
+     * Get message count
+     */
+    getMessageCount() {
+        return this.messages.length;
     }
 }

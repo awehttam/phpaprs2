@@ -12,6 +12,7 @@
 // Include dependencies
 require_once __DIR__ . '/aprs-parser.php';
 require_once __DIR__ . '/station-manager.php';
+require_once __DIR__ . '/message-manager.php';
 
 class APRSISClient
 {
@@ -19,6 +20,7 @@ class APRSISClient
     private $socket;
     private $parser;
     private $stationManager;
+    private $messageManager;
     private $running = true;
     private $connected = false;
     private $packetsReceived = 0;
@@ -30,10 +32,12 @@ class APRSISClient
         $this->config = require __DIR__ . '/config.php';
         $this->parser = new APRSParser($this->config);
         $this->stationManager = StationManager::getInstance($this->config);
+        $this->messageManager = MessageManager::getInstance($this->config);
         $this->startTime = time();
 
-        // Load previously cached stations on startup
+        // Load previously cached stations and messages on startup
         $this->stationManager->loadFromCache();
+        $this->messageManager->loadFromCache();
 
         // Set up signal handlers for graceful shutdown
         if (function_exists('pcntl_signal')) {
@@ -192,13 +196,26 @@ class APRSISClient
 
             if ($parsed !== null && $this->parser->validate($parsed)) {
                 $this->packetsParsed++;
-                $this->stationManager->updateStation($parsed);
+
+                // Check if this is a message or position data
+                if (isset($parsed['type']) && $parsed['type'] === 'message') {
+                    // Only add messages from/to tracked stations
+                    $fromStation = $this->stationManager->getStation($parsed['from']);
+                    $toStation = $this->stationManager->getStation($parsed['to']);
+
+                    if ($fromStation !== null || $toStation !== null) {
+                        $this->messageManager->addMessage($parsed);
+                    }
+                } else {
+                    $this->stationManager->updateStation($parsed);
+                }
             }
 
             // Save to cache periodically (every 5 seconds)
             $now = time();
             if ($now - $lastSave >= 5) {
                 $this->stationManager->saveToCache();
+                $this->messageManager->saveToCache();
                 $lastSave = $now;
             }
 

@@ -25,16 +25,19 @@ class APRSApp {
             onStationsUpdate: (action, station) => this.handleStationUpdate(action, station),
             onStatusChange: (status) => this.handleStatusChange(status),
             onHeartbeat: (data) => this.handleHeartbeat(data),
+            onMessagesUpdate: (action, data) => this.handleMessagesUpdate(action, data),
             onError: (error) => this.handleError(error)
         });
 
         // UI state
         this.sidebarVisible = true;
+        this.messagePanelExpanded = false;
         this.searchFilter = '';
 
         // Initialize UI
         this.initializeUI();
         this.initializeControls();
+        this.initializeMessagePanelResize();
 
         // Setup weather updates on map move
         this.setupWeatherUpdates();
@@ -135,6 +138,19 @@ class APRSApp {
      */
     handleError(error) {
         console.error('SSE Error:', error);
+    }
+
+    /**
+     * Handle message updates from SSE
+     */
+    handleMessagesUpdate(action, data) {
+        if (action === 'batch') {
+            // Initial load - render all messages
+            this.renderMessages();
+        } else if (action === 'delta') {
+            // New messages - append and scroll
+            this.appendMessages(data);
+        }
     }
 
     /**
@@ -283,6 +299,110 @@ class APRSApp {
                 this.toggleSidebar();
             });
         }
+
+        // Toggle message panel
+        const toggleMessagePanelBtn = document.getElementById('toggle-message-panel');
+        const messagePanelHeader = document.getElementById('message-panel-header');
+
+        const toggleMessagePanel = () => {
+            this.messagePanelExpanded = !this.messagePanelExpanded;
+            const panel = document.getElementById('message-panel');
+
+            if (this.messagePanelExpanded) {
+                panel.classList.remove('message-panel-collapsed');
+            } else {
+                panel.classList.add('message-panel-collapsed');
+            }
+        };
+
+        if (toggleMessagePanelBtn) {
+            toggleMessagePanelBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleMessagePanel();
+            });
+        }
+
+        // Also toggle on header click
+        if (messagePanelHeader) {
+            messagePanelHeader.addEventListener('click', () => {
+                toggleMessagePanel();
+            });
+        }
+    }
+
+    /**
+     * Initialize message panel resize functionality
+     */
+    initializeMessagePanelResize() {
+        const resizeHandle = document.getElementById('message-panel-resize-handle');
+        const messagePanel = document.getElementById('message-panel');
+
+        if (!resizeHandle || !messagePanel) {
+            return;
+        }
+
+        // Restore saved height from localStorage
+        const savedHeight = localStorage.getItem('messagePanelHeight');
+        if (savedHeight) {
+            messagePanel.style.height = savedHeight + 'px';
+        }
+
+        let isResizing = false;
+        let startY = 0;
+        let startHeight = 0;
+
+        const onMouseDown = (e) => {
+            // Don't resize if panel is collapsed
+            if (messagePanel.classList.contains('message-panel-collapsed')) {
+                return;
+            }
+
+            isResizing = true;
+            startY = e.clientY;
+            startHeight = messagePanel.offsetHeight;
+
+            messagePanel.classList.add('resizing');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+
+            e.preventDefault();
+        };
+
+        const onMouseMove = (e) => {
+            if (!isResizing) {
+                return;
+            }
+
+            // Calculate new height (mouse moved up = larger panel)
+            const deltaY = startY - e.clientY;
+            const newHeight = startHeight + deltaY;
+
+            // Apply min/max constraints
+            const minHeight = 100;
+            const maxHeight = window.innerHeight - 100;
+            const clampedHeight = Math.max(minHeight, Math.min(newHeight, maxHeight));
+
+            messagePanel.style.height = clampedHeight + 'px';
+        };
+
+        const onMouseUp = () => {
+            if (!isResizing) {
+                return;
+            }
+
+            isResizing = false;
+            messagePanel.classList.remove('resizing');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+
+            // Save height to localStorage
+            localStorage.setItem('messagePanelHeight', messagePanel.offsetHeight);
+        };
+
+        // Add event listeners
+        resizeHandle.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
     }
 
     /**
@@ -294,6 +414,7 @@ class APRSApp {
         const sidebar = document.getElementById('sidebar');
         const infoPanel = document.getElementById('info-panel');
         const controls = document.getElementById('controls');
+        const messagePanel = document.getElementById('message-panel');
 
         // Check if we're in mobile view
         const isMobile = window.innerWidth <= 768;
@@ -304,10 +425,12 @@ class APRSApp {
                 sidebar.classList.add('visible');
                 // Increase z-index of controls so they appear above sidebar
                 controls.style.zIndex = '3000';
+                messagePanel.classList.remove('sidebar-visible');
             } else {
                 // In desktop view, use display property
                 sidebar.style.display = 'flex';
                 controls.style.left = '320px';
+                messagePanel.classList.add('sidebar-visible');
                 controls.style.zIndex = '';
             }
             infoPanel.style.display = 'none';
@@ -317,9 +440,11 @@ class APRSApp {
                 sidebar.classList.remove('visible');
                 // Reset z-index
                 controls.style.zIndex = '';
+                messagePanel.classList.remove('sidebar-visible');
             } else {
                 // In desktop view, use display property
                 sidebar.style.display = 'none';
+                messagePanel.classList.remove('sidebar-visible');
                 controls.style.zIndex = '';
             }
             infoPanel.style.display = 'block';
@@ -347,6 +472,101 @@ class APRSApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    /**
+     * Render all messages
+     */
+    renderMessages() {
+        const messages = this.sseClient.getMessages();
+        const messageList = document.getElementById('message-list');
+        const messageCount = document.getElementById('message-count');
+
+        // Update count badge
+        messageCount.textContent = messages.length;
+
+        if (messages.length === 0) {
+            messageList.innerHTML = `
+                <div class="empty-message-panel">
+                    <i class="fas fa-comments fa-2x"></i>
+                    <p>No messages yet...</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Render all messages
+        messageList.innerHTML = messages.map(msg => this.createMessageHTML(msg)).join('');
+
+        // Auto-scroll to bottom
+        this.scrollMessagesToBottom();
+    }
+
+    /**
+     * Append new messages to list
+     */
+    appendMessages(newMessages) {
+        const messageList = document.getElementById('message-list');
+        const messageCount = document.getElementById('message-count');
+
+        // Update count
+        const totalCount = this.sseClient.getMessageCount();
+        messageCount.textContent = totalCount;
+
+        // Remove empty message if present
+        const emptyMsg = messageList.querySelector('.empty-message-panel');
+        if (emptyMsg) {
+            emptyMsg.remove();
+        }
+
+        // Append new messages
+        const fragment = document.createDocumentFragment();
+        newMessages.forEach(msg => {
+            const div = document.createElement('div');
+            div.innerHTML = this.createMessageHTML(msg);
+            const messageElement = div.firstElementChild; // Use firstElementChild to skip text nodes
+            if (messageElement) {
+                fragment.appendChild(messageElement);
+            }
+        });
+
+        messageList.appendChild(fragment);
+
+        // Auto-scroll to bottom
+        this.scrollMessagesToBottom();
+    }
+
+    /**
+     * Create HTML for a single message
+     */
+    createMessageHTML(msg) {
+        const time = new Date(msg.timestamp * 1000).toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        return `
+            <div class="message-item">
+                <span class="message-item-time">[${time}]</span>
+                <span class="message-item-from">${this.escapeHtml(msg.from)}</span>
+                <span> &gt; </span>
+                <span class="message-item-to">${this.escapeHtml(msg.to)}</span>
+                <span>: </span>
+                <span class="message-item-text">${this.escapeHtml(msg.message)}</span>
+            </div>
+        `;
+    }
+
+    /**
+     * Scroll message list to bottom
+     */
+    scrollMessagesToBottom() {
+        const messageList = document.getElementById('message-list');
+        if (messageList && !messageList.querySelector('.empty-message-panel')) {
+            messageList.scrollTop = messageList.scrollHeight;
+        }
     }
 
     /**

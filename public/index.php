@@ -92,6 +92,29 @@
             </button>
         </div>
 
+        <!-- Message panel (docked to bottom) -->
+        <div id="message-panel" class="message-panel-collapsed sidebar-visible">
+            <div id="message-panel-resize-handle" class="message-panel-resize-handle"></div>
+            <div id="message-panel-header">
+                <div class="message-panel-title">
+                    <i class="fas fa-comments"></i>
+                    <span>APRS Messages</span>
+                    <span id="message-count" class="message-badge">0</span>
+                </div>
+                <button id="toggle-message-panel" class="message-panel-toggle" title="Toggle Messages">
+                    <i class="fas fa-chevron-up"></i>
+                </button>
+            </div>
+            <div id="message-list-container">
+                <div id="message-list">
+                    <div class="empty-message-panel">
+                        <i class="fas fa-comments fa-2x"></i>
+                        <p>No messages yet...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Info panel (appears when no sidebar) -->
         <div id="info-panel" style="display: none;">
             <div id="info-content">

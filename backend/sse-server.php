@@ -10,6 +10,7 @@
 
 // Include dependencies
 require_once __DIR__ . '/station-manager.php';
+require_once __DIR__ . '/message-manager.php';
 
 // Set headers for SSE
 header('Content-Type: text/event-stream');
@@ -31,6 +32,7 @@ $config = require __DIR__ . '/config.php';
 
 // Create station manager instance
 $stationManager = StationManager::getInstance($config);
+$messageManager = MessageManager::getInstance($config);
 
 // Get update interval from config
 $updateInterval = $config['sse']['update_interval'] ?? 2;
@@ -45,6 +47,7 @@ $lastHeartbeat = time();
 
 // Track last sent state for delta updates
 $lastSentStations = [];
+$lastSentMessageCount = 0;
 
 // Log function
 function logSSE($message) {
@@ -111,6 +114,13 @@ function getChangedStations($currentStations, &$lastSentStations, $stationTimeou
 logSSE("New SSE client connected");
 sendEvent('connected', ['message' => 'Connected to APRS-IS stream', 'time' => time()], $eventId);
 
+// Load and send initial messages
+$messageManager->loadFromCache();
+$messages = $messageManager->getMessages();
+sendEvent('messages', $messages, $eventId);
+logSSE("Sent initial " . count($messages) . " messages to client (event #$eventId)");
+$lastSentMessageCount = count($messages);
+
 // Flag to track initial load
 $isInitialLoad = true;
 
@@ -156,6 +166,21 @@ while (true) {
                 unset($lastSentStations[$callsign]);
             }
         }
+    }
+
+    // Check for new messages (delta update)
+    $messageManager->loadFromCache();
+    $currentMessages = $messageManager->getMessages();
+    $currentMessageCount = count($currentMessages);
+
+    if ($currentMessageCount > $lastSentMessageCount) {
+        // Get only new messages (slice from last sent count)
+        $newMessages = array_slice($currentMessages, $lastSentMessageCount);
+
+        sendEvent('messages_delta', $newMessages, $eventId);
+        logSSE("Sent message delta: " . count($newMessages) . " new messages (event #$eventId)");
+
+        $lastSentMessageCount = $currentMessageCount;
     }
 
     // Send heartbeat if needed

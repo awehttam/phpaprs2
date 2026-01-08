@@ -76,17 +76,28 @@ class APRSParser
                 $parsed = $this->parseObject($data);
                 break;
 
+            case ':': // APRS message
+                $parsed = $this->parseMessage($callsign, $data);
+                break;
+
             default:
                 $this->log("Unsupported data type: $dataType");
                 return null;
         }
 
         if ($parsed === null) {
-            $this->log("Failed to parse position data");
+            $this->log("Failed to parse packet data");
             return null;
         }
 
-        // Add callsign and timestamp
+        // Messages are handled differently - they're valid as-is
+        if (isset($parsed['type']) && $parsed['type'] === 'message') {
+            $parsed['raw_packet'] = $packet;
+            $this->log("Successfully parsed message: " . json_encode($parsed));
+            return $parsed;
+        }
+
+        // For position data, add callsign and timestamp
         // For objects, use object name as callsign
         if (isset($parsed['is_object']) && isset($parsed['object_name'])) {
             $parsed['callsign'] = $parsed['object_name'];
@@ -597,6 +608,70 @@ class APRSParser
     }
 
     /**
+     * Parse APRS message packet
+     * Format: :ADDRESSEE:MESSAGE TEXT{msgid
+     *
+     * @param string $callsign Source callsign
+     * @param string $data Message data (including leading :)
+     * @return array|null Parsed message or null if invalid/telemetry
+     */
+    private function parseMessage(string $callsign, string $data): ?array
+    {
+        // Remove data type identifier (:)
+        $data = substr($data, 1);
+
+        // Message format: ADDRESSEE:MESSAGE{id
+        // Addressee is 9 characters (right-padded with spaces)
+        if (strlen($data) < 11) { // 9 chars addressee + : + at least 1 char message
+            $this->log("Message data too short: $data");
+            return null;
+        }
+
+        // Extract addressee (first 9 characters)
+        $addressee = substr($data, 0, 9);
+
+        // Check for separator colon at position 9
+        if ($data[9] !== ':') {
+            $this->log("Missing message separator at position 9");
+            return null;
+        }
+
+        // Extract message text (everything after position 10)
+        $messageText = substr($data, 10);
+
+        // Clean addressee (remove trailing spaces)
+        $addressee = rtrim($addressee);
+
+        // Filter out telemetry messages (PARM., UNIT., EQNS., BITS.)
+        // These are technical data, not general text messages
+        $telemetryPrefixes = ['PARM.', 'UNIT.', 'EQNS.', 'BITS.'];
+        foreach ($telemetryPrefixes as $prefix) {
+            if (strpos($messageText, $prefix) === 0) {
+                $this->log("Filtered telemetry message: $prefix");
+                return null;
+            }
+        }
+
+        // Extract message ID if present (format: {msgid where msgid is 1-5 alphanumeric)
+        $messageId = null;
+        if (preg_match('/\{([A-Za-z0-9]{1,5})$/', $messageText, $matches)) {
+            $messageId = $matches[1];
+            // Remove message ID from text
+            $messageText = substr($messageText, 0, -strlen($matches[0]));
+        }
+
+        // Return parsed message data
+        return [
+            'type' => 'message',
+            'from' => $callsign,
+            'to' => $addressee,
+            'message' => trim($messageText),
+            'message_id' => $messageId,
+            'timestamp' => time()
+        ];
+    }
+
+    /**
      * Log debug message
      */
     private function log(string $message): void
@@ -623,7 +698,14 @@ class APRSParser
      */
     public function validate(array $parsed): bool
     {
-        // Check required fields
+        // Messages have different validation rules
+        if (isset($parsed['type']) && $parsed['type'] === 'message') {
+            return isset($parsed['from']) &&
+                   isset($parsed['to']) &&
+                   isset($parsed['message']);
+        }
+
+        // Check required fields for position data
         if (!isset($parsed['callsign']) || !isset($parsed['latitude']) || !isset($parsed['longitude'])) {
             return false;
         }
