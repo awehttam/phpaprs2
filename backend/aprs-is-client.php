@@ -32,6 +32,9 @@ class APRSISClient
         $this->stationManager = StationManager::getInstance($this->config);
         $this->startTime = time();
 
+        // Load previously cached stations on startup
+        $this->stationManager->loadFromCache();
+
         // Set up signal handlers for graceful shutdown
         if (function_exists('pcntl_signal')) {
             pcntl_signal(SIGTERM, [$this, 'shutdown']);
