@@ -602,10 +602,13 @@ html, body {
 @media (max-width: 768px) {
     #message-panel {
         max-height: 30vh;
+        left: 0;
+        right: 0;
     }
 
     #message-panel.sidebar-visible {
-        right: 700px;
+        left: 0;
+        right: 0;
     }
 
     #message-panel.message-panel-collapsed {
