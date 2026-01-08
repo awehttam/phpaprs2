@@ -92,16 +92,12 @@ function getChangedStations($currentStations, &$lastSentStations, $stationTimeou
         }
     }
 
-    // Check for removed stations (only mark as removed if timed out)
+    // Check for removed stations
     $removed = [];
-    $now = time();
-    foreach ($lastSentStations as $callsign => $station) {
+    foreach ($lastSentStations as $callsign => $lastSentStation) {
         if (!isset($currentStations[$callsign])) {
-            // Only mark as removed if station has actually timed out
-            // Don't remove if it just temporarily disappeared from cache
-            if (($now - $station['last_update']) > $stationTimeout) {
-                $removed[] = $callsign;
-            }
+            // Station is no longer in current data - mark as removed
+            $removed[] = $callsign;
         }
     }
 
@@ -127,8 +123,16 @@ while (true) {
     }
 
     // Load stations from cache
-    $stationManager->loadFromCache();
+    $loadSuccess = $stationManager->loadFromCache();
     $stations = $stationManager->getStations();
+
+    // Validate loaded data - if empty and we had stations before, cache might be corrupted
+    if (empty($stations) && !empty($lastSentStations) && !$isInitialLoad) {
+        logSSE("WARNING: Cache returned empty stations but we have " . count($lastSentStations) . " known stations. Skipping update to prevent data loss.");
+        // Don't update - keep previous state
+        sleep($updateInterval);
+        continue;
+    }
 
     // On initial connection, send all stations
     if ($isInitialLoad) {
